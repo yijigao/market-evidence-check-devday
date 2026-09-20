@@ -38,7 +38,8 @@ reason codes, VWAP, estimated cost, spread, quote age, policy version, and
 
 ## Demo
 
-- [2-minute submission demo](demo/market-evidence-check-demo.webm)
+- [80-second OKX AI / A2MCP cost-limit demo](demo/market-evidence-cost-limit-demo.webm)
+- [Original 2-minute caller-flow demo](demo/market-evidence-check-demo.webm)
 - [Isolated consumer source](demo/demo_consumer.py)
 - [Saved deterministic demo output](evidence/DEMO_OUTPUT.md)
 
