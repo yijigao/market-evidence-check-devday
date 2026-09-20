@@ -40,6 +40,16 @@ REQUIRED_INPUT_FIELDS = (
     {"name": "side", "type": "string", "required": True, "carrier": "body"},
     {"name": "notional_usdt", "type": "number", "required": True, "carrier": "body"},
 )
+A2MCP_MAX_COST_FIELD = {
+    "name": "max_cost_bps",
+    "type": "number",
+    "required": True,
+    "carrier": "body",
+    "description": (
+        "Maximum acceptable estimated execution cost in bps; valid range 0-1000; "
+        "use 30 to apply the default Alpha Factory threshold."
+    ),
+}
 
 
 class InputError(ValueError):
@@ -55,6 +65,7 @@ class ValidatedRequest:
     instrument: str
     side: str
     notional_usdt: float
+    max_cost_bps: float
     taker_fee_bps: float
     slippage_buffer_bps: float
     fee_source: str
@@ -66,12 +77,14 @@ def utc_now() -> str:
 
 
 def input_required(payload: Any) -> dict[str, Any] | None:
-    """Return the installed A2MCP contract for missing required body fields."""
+    """Return the A2MCP interaction contract while preserving direct-API defaults."""
     if not isinstance(payload, dict):
         return None
     missing = [field for field in REQUIRED_INPUT_FIELDS if field["name"] not in payload]
     if not missing:
         return None
+    if A2MCP_MAX_COST_FIELD["name"] not in payload:
+        missing.append(A2MCP_MAX_COST_FIELD)
     return {
         "status": "input_required",
         "input_required": {
@@ -85,7 +98,7 @@ def input_required(payload: Any) -> dict[str, Any] | None:
 def validate_request(payload: Any) -> ValidatedRequest:
     if not isinstance(payload, dict):
         raise InputError("request body must be a JSON object")
-    allowed = {"instrument", "side", "notional_usdt", "cost_assumptions"}
+    allowed = {"instrument", "side", "notional_usdt", "max_cost_bps", "cost_assumptions"}
     unknown = sorted(set(payload) - allowed)
     if unknown:
         raise InputError(f"unknown fields: {', '.join(unknown)}")
@@ -103,6 +116,13 @@ def validate_request(payload: Any) -> ValidatedRequest:
     notional = float(notional)
     if not math.isfinite(notional) or not 0 < notional <= MAX_NOTIONAL_USDT:
         raise InputError(f"notional_usdt must be within (0, {MAX_NOTIONAL_USDT:g}]")
+
+    max_cost = payload.get("max_cost_bps", POLICY["max_estimated_cost_bps"])
+    if isinstance(max_cost, bool) or not isinstance(max_cost, (int, float)):
+        raise InputError("max_cost_bps must be numeric")
+    max_cost = float(max_cost)
+    if not math.isfinite(max_cost) or not 0 <= max_cost <= 1000:
+        raise InputError("max_cost_bps must be within [0, 1000]")
 
     costs = payload.get("cost_assumptions") or {}
     if not isinstance(costs, dict):
@@ -123,7 +143,7 @@ def validate_request(payload: Any) -> ValidatedRequest:
 
     fee, fee_source = cost("taker_fee_bps", POLICY["default_taker_fee_bps"])
     slip, slip_source = cost("slippage_buffer_bps", POLICY["default_slippage_buffer_bps"])
-    return ValidatedRequest(instrument, side, notional, fee, slip, fee_source, slip_source)
+    return ValidatedRequest(instrument, side, notional, max_cost, fee, slip, fee_source, slip_source)
 
 
 class OKXPublicClient:
@@ -259,9 +279,9 @@ def deterministic_report(request: ValidatedRequest, snapshot: dict[str, Any]) ->
         "depth": {"requested_notional_usdt": request.notional_usdt,
                   "lot_aligned_target_notional_usdt": target_notional_at_mid,
                   "filled_notional_usdt": filled_notional, "passed": fill_complete},
-        "estimated_cost": {"threshold_bps": POLICY["max_estimated_cost_bps"],
+        "estimated_cost": {"threshold_bps": request.max_cost_bps,
                            "actual_bps": estimated_cost_bps,
-                           "passed": estimated_cost_bps is not None and estimated_cost_bps <= POLICY["max_estimated_cost_bps"]},
+                           "passed": estimated_cost_bps is not None and estimated_cost_bps <= request.max_cost_bps},
     }
     reasons = []
     if not checks["quote_age"]["passed"]: reasons.append("STALE_QUOTE")

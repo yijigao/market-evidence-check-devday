@@ -4,7 +4,8 @@
 cost, and freshness constraints?**
 
 Market Evidence Check is a deterministic pre-execution market-evidence and
-feasibility gate for AI agents. Given an instrument, side, and USDT notional,
+feasibility gate for AI agents. Given an instrument, side, USDT notional, and
+an optional direct-API cost limit,
 it evaluates public OKX metadata and displayed order-book depth, then returns a
 structured `GO`, `WATCH`, or `REJECT` result.
 
@@ -33,6 +34,7 @@ reason codes, VWAP, estimated cost, spread, quote age, policy version, and
 
 - [OKX AI Agent #13778](https://www.okx.ai/agents/13778)
 - [Platform acceptance evidence](evidence/PLATFORM_INVOCATION.md)
+- [1 bps vs 100 bps A2MCP evidence](evidence/SUBMISSION_EVIDENCE.md)
 
 ## Demo
 
@@ -58,8 +60,7 @@ python3 -m pytest -q test_evidence_api.py
 python3 demo/demo_consumer.py
 ```
 
-The accepted production-state targeted suite passed `17` tests before the
-evidence freeze.
+The current targeted suite passes `27` tests.
 
 ## Build-period evidence
 
@@ -68,6 +69,9 @@ evidence freeze.
 - `1adc6c3` — structured A2MCP missing-input compatibility.
 - `67becfa` — real platform acceptance evidence.
 - `cd31ab7` — reviewer evidence freeze.
+- `1c6dd29` — optional per-request estimated-cost limit.
+- `1878b9c` — explicit four-field OKX AI/A2MCP collection compatibility.
+- `6118be3` — cost-limit demo evidence freeze.
 
 See [the reviewer evidence pack](evidence/REVIEWER_EVIDENCE_PACK.md) for the
 verified delta, safe claims, limitations, and explicit do-not-claim list.
@@ -77,6 +81,7 @@ verified delta, safe claims, limitations, and explicit do-not-claim list.
 - VWAP is a public snapshot estimate, not a guaranteed fill.
 - Default fees and slippage buffers are assumptions, not account-observed
   values.
-- No historical replay, fault injection, payment/x402, or caller-defined cost
-  limit is implemented.
+- Direct API callers may optionally set `max_cost_bps`; omission preserves the
+  30 bps default. OKX AI collects this value explicitly.
+- No historical replay, fault injection, or payment/x402 is implemented.
 - No real order was submitted or executed.

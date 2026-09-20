@@ -67,6 +67,52 @@ def test_complete_live_check_returns_structured_result():
     assert body["execution_cost"]["vwap_is_snapshot_estimate"] is True
 
 
+def test_omitted_max_cost_uses_policy_default():
+    status, body = evaluate(
+        {"instrument": "BTC-USDT", "side": "buy", "notional_usdt": 1000},
+        FakeClient(snapshot()),
+    )
+    assert status == 200
+    assert body["policy_checks"]["estimated_cost"]["threshold_bps"] == 30.0
+
+
+def test_tighter_max_cost_can_reject():
+    status, body = evaluate(
+        {"instrument": "BTC-USDT", "side": "buy", "notional_usdt": 1000, "max_cost_bps": 10},
+        FakeClient(snapshot()),
+    )
+    assert status == 200 and body["decision"] == "REJECT"
+    assert body["policy_checks"]["estimated_cost"] == {
+        "threshold_bps": 10.0,
+        "actual_bps": pytest.approx(12.500025001251014),
+        "passed": False,
+    }
+    assert body["reason_codes"] == ["ESTIMATED_COST_EXCEEDS_POLICY"]
+
+
+def test_looser_max_cost_only_changes_cost_threshold():
+    payload = {"instrument": "BTC-USDT", "side": "buy", "notional_usdt": 1000}
+    default_status, default = evaluate(payload, FakeClient(snapshot()))
+    loose_status, loose = evaluate({**payload, "max_cost_bps": 100}, FakeClient(snapshot()))
+
+    assert default_status == loose_status == 200
+    assert loose["policy_checks"]["estimated_cost"]["threshold_bps"] == 100.0
+    for field in ("market_evidence", "execution_cost", "instrument_metadata", "data_quality"):
+        assert loose[field] == default[field]
+    for check in ("quote_age", "spread", "depth"):
+        assert loose["policy_checks"][check] == default["policy_checks"][check]
+
+
+@pytest.mark.parametrize("value", [True, "30", -1, 1000.1, float("inf"), float("nan")])
+def test_invalid_max_cost_fails_closed(value):
+    status, body = evaluate(
+        {"instrument": "BTC-USDT", "side": "buy", "notional_usdt": 1000, "max_cost_bps": value},
+        FakeClient(snapshot()),
+    )
+    assert status == 400 and body["decision"] == "REJECT"
+    assert body["report_status"] == "REJECTED_INPUT"
+
+
 @pytest.mark.parametrize("payload", [
     {},
     {"instrument": "BTC-USDT", "side": "hold", "notional_usdt": 10},
@@ -134,13 +180,31 @@ def test_empty_object_requests_all_a2mcp_required_fields():
         ("instrument", "string", "body"),
         ("side", "string", "body"),
         ("notional_usdt", "number", "body"),
+        ("max_cost_bps", "number", "body"),
     ]
+    assert fields[-1]["required"] is True
+    assert "range 0-1000" in fields[-1]["description"]
+    assert "use 30" in fields[-1]["description"]
 
 
 def test_partial_object_requests_only_missing_field():
     status, body = post(b'{"instrument":"BTC-USDT-SWAP","side":"buy"}')
     assert status == 400
-    assert [field["name"] for field in body["input_required"]["fields"]] == ["notional_usdt"]
+    assert [field["name"] for field in body["input_required"]["fields"]] == [
+        "notional_usdt",
+        "max_cost_bps",
+    ]
+
+
+def test_complete_legacy_request_does_not_require_max_cost():
+    expected = {"report_status": "COMPLETE", "decision": "GO", "sentinel": "legacy-default"}
+    original = evidence_api.evaluate
+    evidence_api.evaluate = lambda payload: (200, expected)
+    try:
+        status, body = post(b'{"instrument":"BTC-USDT-SWAP","side":"buy","notional_usdt":1000}')
+    finally:
+        evidence_api.evaluate = original
+    assert status == 200 and body == expected
 
 
 def test_complete_request_still_uses_existing_engine(monkeypatch):
