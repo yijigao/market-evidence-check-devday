@@ -1,0 +1,403 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Market Evidence Check",
+    "version": "1.0.0",
+    "summary": "Read-only pre-execution evidence check using public OKX market data.",
+    "description": "Checks whether a stated OKX instrument, side, and USDT notional fits a current public order-book snapshot under declared spread, quote-age, displayed-depth, and estimated one-way-cost limits. It never places orders and never accesses an account, wallet, private API, or API key. GO only means the current public snapshot passed the declared checks; it is not a trading recommendation, signal, profit prediction, or fill guarantee.",
+    "contact": {
+      "name": "Alpha Factory",
+      "email": "founder@amzwatch.xyz",
+      "url": "https://www.amzwatch.xyz/market-evidence-check/"
+    },
+    "license": {
+      "name": "Connector use terms",
+      "url": "https://www.amzwatch.xyz/market-evidence-check/terms.html"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://devday.167-179-82-72.nip.io",
+      "description": "Market Evidence Check public read-only API"
+    }
+  ],
+  "tags": [
+    {
+      "name": "health",
+      "description": "Service liveness"
+    },
+    {
+      "name": "evidence",
+      "description": "Read-only market evidence checks"
+    }
+  ],
+  "paths": {
+    "/__devday_healthz": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "operationId": "getHealth",
+        "summary": "Check service liveness",
+        "responses": {
+          "200": {
+            "description": "Service is reachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "example": {
+                  "status": "ok",
+                  "purpose": "prebuild-infrastructure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/evidence/check": {
+      "post": {
+        "tags": [
+          "evidence"
+        ],
+        "operationId": "checkEvidence",
+        "summary": "Check one stated OKX order size against a current public snapshot",
+        "description": "Uses only public OKX REST market data. No authentication, account, wallet, private API, or order capability is involved. Technical failures fail closed and never return GO.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceCheckRequest"
+              },
+              "examples": {
+                "btcBuy1000": {
+                  "summary": "Buy 1,000 USDT of BTC-USDT with the default 30 bps limit",
+                  "value": {
+                    "instrument": "BTC-USDT",
+                    "side": "buy",
+                    "notional_usdt": 1000,
+                    "max_cost_bps": 30
+                  }
+                },
+                "ethSell5000": {
+                  "summary": "Sell 5,000 USDT of ETH-USDT",
+                  "value": {
+                    "instrument": "ETH-USDT",
+                    "side": "sell",
+                    "notional_usdt": 5000,
+                    "max_cost_bps": 30
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "A complete snapshot report or a fail-closed technical-failure report. Inspect report_status and decision; do not treat HTTP 200 alone as GO.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceReport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input. Decision is REJECT and no order or account action is possible.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceErrorReport"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "Upstream public data unavailable in the current production mapping. Compatible clients should also handle the same EvidenceReport shape returned with HTTP 200 and report_status TECHNICAL_FAILURE.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceReport"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {},
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "ok"
+          },
+          "purpose": {
+            "type": "string",
+            "example": "prebuild-infrastructure"
+          }
+        },
+        "additionalProperties": true
+      },
+      "EvidenceCheckInputEcho": {
+        "type": "object",
+        "required": [
+          "instrument",
+          "side",
+          "notional_usdt"
+        ],
+        "properties": {
+          "instrument": {
+            "type": "string",
+            "example": "BTC-USDT"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ]
+          },
+          "notional_usdt": {
+            "type": "number",
+            "example": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "CostAssumptions": {
+        "type": "object",
+        "description": "Optional caller assumptions. Omit to use policy defaults: taker fee 10 bps and slippage buffer 2 bps. Supplied values must be labelled caller assumptions, never account-observed fees.",
+        "properties": {
+          "taker_fee_bps": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000,
+            "default": 10
+          },
+          "slippage_buffer_bps": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000,
+            "default": 2
+          }
+        },
+        "additionalProperties": false
+      },
+      "EvidenceCheckRequest": {
+        "type": "object",
+        "required": [
+          "instrument",
+          "side",
+          "notional_usdt"
+        ],
+        "properties": {
+          "instrument": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[A-Z0-9-]+$",
+            "description": "OKX instrument ID, for example BTC-USDT, ETH-USDT, or BTC-USDT-SWAP.",
+            "example": "BTC-USDT"
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "buy",
+              "sell"
+            ]
+          },
+          "notional_usdt": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 1000000,
+            "description": "Stated order notional in USDT. This is a hypothetical check size, not an instruction to trade.",
+            "example": 1000
+          },
+          "max_cost_bps": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1000,
+            "default": 30,
+            "description": "Maximum acceptable estimated one-way execution cost in basis points."
+          },
+          "cost_assumptions": {
+            "$ref": "#/components/schemas/CostAssumptions"
+          }
+        },
+        "additionalProperties": false
+      },
+      "EvidenceReport": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "policy_version",
+          "decision",
+          "reason_codes",
+          "report_status"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "example": "1.0"
+          },
+          "policy_version": {
+            "type": "string",
+            "example": "2026-09-17.1"
+          },
+          "mode": {
+            "type": "string",
+            "example": "live_public"
+          },
+          "input": {
+            "$ref": "#/components/schemas/EvidenceCheckInputEcho"
+          },
+          "instrument_metadata": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "market_evidence": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "execution_cost": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "policy_checks": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "GO",
+              "WATCH",
+              "REJECT"
+            ]
+          },
+          "reason_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "data_quality": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "unverified_assumptions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "evidence_hash": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "checked_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "report_status": {
+            "type": "string",
+            "enum": [
+              "COMPLETE",
+              "REJECTED_INPUT",
+              "TECHNICAL_FAILURE"
+            ]
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "EvidenceErrorReport": {
+        "type": "object",
+        "required": [
+          "report_status",
+          "decision",
+          "reason_codes"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "example": "1.0"
+          },
+          "policy_version": {
+            "type": "string",
+            "example": "2026-09-17.1"
+          },
+          "request_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "checked_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "report_status": {
+            "type": "string",
+            "enum": [
+              "REJECTED_INPUT"
+            ]
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "REJECT"
+            ]
+          },
+          "reason_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "example": "input_required"
+          },
+          "input_required": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "market_evidence": {
+            "type": "null"
+          },
+          "execution_cost": {
+            "type": "null"
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "security": []
+}
